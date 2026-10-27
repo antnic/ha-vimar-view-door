@@ -1,0 +1,24 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Vimar VIEW Door Setup",
+        "description": "Enter your MyVIMAR credentials or directly enter the local IP and Auth Code to operate 100% locally.",
+        "data": {
+          "email": "MyVIMAR Email (optional with Auth Code)",
+          "password": "MyVIMAR Password (optional with Auth Code)",
+          "device_ip": "Local IP Address of Intercom (e.g. 192.168.1.100)",
+          "auth_code": "Auth Code / Token (optional for 100% local mode)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Vimar servers or local video intercom.",
+      "invalid_auth": "Invalid MyVIMAR credentials (wrong email or password).",
+      "no_auth_provided": "Please enter MyVIMAR email and password or a local Auth Code."
+    },
+    "abort": {
+      "already_configured": "This Vimar video intercom is already configured in Home Assistant."
+    }
+  }
+}

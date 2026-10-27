@@ -1,0 +1,24 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurazione Vimar VIEW Door",
+        "description": "Inserisci le credenziali MyVIMAR oppure inserisci direttamente l'IP locale e il codice Auth Code per operare al 100% in locale.",
+        "data": {
+          "email": "Email MyVIMAR (facoltativa con Auth Code)",
+          "password": "Password MyVIMAR (facoltativa con Auth Code)",
+          "device_ip": "Indirizzo IP Locale del Videocitofono (es. 192.168.1.100)",
+          "auth_code": "Codice Auth Code / Token (opzionale per modalità 100% locale)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossibile connettersi ai server Vimar o al videocitofono.",
+      "invalid_auth": "Credenziali MyVIMAR non valide (email o password errate). Verifica le credenziali.",
+      "no_auth_provided": "Inserisci email e password MyVIMAR oppure il codice Auth Code locale."
+    },
+    "abort": {
+      "already_configured": "Questo videocitofono Vimar è già stato configurato in Home Assistant."
+    }
+  }
+}
