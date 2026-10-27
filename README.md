@@ -140,4 +140,8 @@ Released under the [MIT License](LICENSE).
 ---
 
 ## ⚠️ Disclaimer
+
 This project is an independent community project and is not affiliated with, endorsed by, or sponsored by Vimar S.p.A. or Qualvision. All product names, trademarks, and registered trademarks are the property of their respective owners.
+
+**Use at Your Own Risk:**  
+This integration is provided "as is", without warranty of any kind, express or implied. The author assumes **no responsibility or liability** for any malfunction, disruption, or unintended behavior of the integration, nor for any damage, malfunction, degradation, or warranty invalidation of connected devices, gates, locks, or electrical equipment. You use this software **entirely at your own risk**.
