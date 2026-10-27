@@ -1,5 +1,7 @@
 # Vimar VIEW Door - Home Assistant Integration
 
+<img src="icon.png" alt="Vimar VIEW Door Icon" width="100" align="right">
+
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/default)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2023.1%2B-blue.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
