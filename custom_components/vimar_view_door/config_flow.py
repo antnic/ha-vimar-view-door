@@ -13,6 +13,7 @@ from .const import (
     CONF_DEVICE_IP,
     CONF_AUTH_CODE,
     CONF_DEVICE_ID,
+    CONF_DEVICE_MAC,
 )
 from .vimar_api import VimarDeviceApi
 
@@ -73,12 +74,22 @@ class VimarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     await self.async_set_unique_id(unique_id)
                     self._abort_if_unique_id_configured()
 
+                    device_mac = getattr(api, "device_mac", None)
+                    if not device_mac and device_ip:
+                        try:
+                            status = await self.hass.async_add_executor_job(api.get_status)
+                            if status and status.get("info_mac"):
+                                device_mac = status["info_mac"]
+                        except Exception:
+                            pass
+
                     entry_data = {
                         CONF_EMAIL: email,
                         CONF_PASSWORD: password,
                         CONF_DEVICE_IP: device_ip,
                         CONF_AUTH_CODE: device_info.get("out_auth_code", auth_code),
                         CONF_DEVICE_ID: unique_id,
+                        CONF_DEVICE_MAC: device_mac or "",
                     }
 
                     return self.async_create_entry(

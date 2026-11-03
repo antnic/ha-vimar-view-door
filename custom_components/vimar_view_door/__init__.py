@@ -13,6 +13,7 @@ from .const import (
     CONF_DEVICE_IP,
     CONF_AUTH_CODE,
     CONF_DEVICE_ID,
+    CONF_DEVICE_MAC,
     DEFAULT_POLL_INTERVAL,
 )
 from .vimar_api import VimarDeviceApi
@@ -28,6 +29,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     device_ip = entry.data.get(CONF_DEVICE_IP, "")
     auth_code = entry.data.get(CONF_AUTH_CODE)
     device_id = entry.data.get(CONF_DEVICE_ID)
+    device_mac = entry.data.get(CONF_DEVICE_MAC)
 
     api = VimarDeviceApi(
         email=email,
@@ -35,6 +37,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device_ip=device_ip,
         out_auth_code=auth_code,
         device_id=device_id,
+        device_mac=device_mac,
     )
 
     # Initial cloud sync only if auth_code is missing
