@@ -17,20 +17,30 @@ import xml.etree.ElementTree as ET
 
 _LOGGER = logging.getLogger(__name__)
 
-def _get_cloud_ssl_context():
-    """Get a verifying SSL context for cloud communication."""
-    try:
-        from homeassistant.util.ssl import client_context
-        return client_context()
-    except Exception:
-        return ssl.create_default_context()
-
 def _get_local_ssl_context():
-    """Get an unverified SSL context for local intercom (self-signed cert)."""
-    ctx = ssl.create_default_context()
+    """Get an unverified SSL context for local intercom (self-signed cert, loads no CA bundle from disk)."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
+
+def get_device_cert_fingerprint(ip, timeout=1.5):
+    """Retrieve SHA-256 TLS certificate fingerprint from device port 443 without sending credentials."""
+    if not ip:
+        return None
+    clean_ip = ip.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+    try:
+        ctx = _get_local_ssl_context()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            with ctx.wrap_socket(sock) as tls_sock:
+                tls_sock.connect((clean_ip, 443))
+                der = tls_sock.getpeercert(binary_form=True)
+                if der:
+                    return hashlib.sha256(der).hexdigest().lower()
+    except Exception:
+        return None
+    return None
 
 def encode_device_password(auth_code):
     """Calcola l'hash della password dispositivo esattamente come QvEncrypt.EncodeDevicePassword dell'APK."""
@@ -53,6 +63,7 @@ class VimarDeviceApi:
         device_id=None,
         device_name=None,
         device_mac=None,
+        cert_fingerprint=None,
     ):
         self.email = email.strip() if email else ""
         self.password = password.strip() if password else ""
@@ -61,7 +72,8 @@ class VimarDeviceApi:
         self.oem_id = oem_id
         self.app_id = app_id
         
-        self.cloud_ssl_ctx = _get_cloud_ssl_context()
+        # SSL contexts: local context is built in-memory without disk I/O; cloud context is lazy-loaded in executor
+        self._cloud_ssl_ctx = None
         self.local_ssl_ctx = _get_local_ssl_context()
 
         self.qv_account = None
@@ -75,6 +87,7 @@ class VimarDeviceApi:
         self.device_id = device_id
         self.device_name = device_name
         self.device_mac = (device_mac or "").strip().lower() or None
+        self.cert_fingerprint = (cert_fingerprint or "").strip().lower() or None
         self.device_info = {}
 
         self._last_discovery_time = 0.0
@@ -89,7 +102,19 @@ class VimarDeviceApi:
                 "model": "IDS9457AW",
                 "out_auth_code": self.out_auth_code,
                 "mac": self.device_mac or "",
+                "cert_fingerprint": self.cert_fingerprint or "",
             }
+
+    @property
+    def cloud_ssl_ctx(self):
+        """Lazy-loaded verifying SSL context for cloud communication (runs in executor)."""
+        if self._cloud_ssl_ctx is None:
+            try:
+                from homeassistant.util.ssl import client_context
+                self._cloud_ssl_ctx = client_context()
+            except Exception:
+                self._cloud_ssl_ctx = ssl.create_default_context()
+        return self._cloud_ssl_ctx
 
     def authenticate_and_fetch_devices(self):
         """Execute full cloud login and retrieve device list & auth tokens."""
@@ -292,7 +317,7 @@ class VimarDeviceApi:
         return f'Digest username="{username}",realm="{realm}",nonce="{nonce}",uri="/tdkcgi",algorithm=MD5,response="{response}",opaque="{opaque}",qop={qop},nc={nc},cnonce="{cnonce}"'
 
     def _execute_cgi_on_ip(self, ip, command_name, content_xml=""):
-        """Execute a local CGI command against a specific IP."""
+        """Execute a local CGI command against a specific IP strictly over HTTPS."""
         if not ip:
             raise ValueError("IP address required.")
         if not self.out_auth_code:
@@ -314,47 +339,38 @@ class VimarDeviceApi:
    </header>
 </envelope>"""
 
-        urls_to_try = []
-        if ip.startswith("http://") or ip.startswith("https://"):
-            urls_to_try.append(f"{ip.rstrip('/')}/tdkcgi")
-        else:
-            urls_to_try.append(f"https://{ip}/tdkcgi")
-            urls_to_try.append(f"http://{ip}/tdkcgi")
+        clean_ip = ip.replace("https://", "").replace("http://", "").split("/")[0]
+        url = f"https://{clean_ip}/tdkcgi"
 
         headers = {
             "Content-Type": "application/xml; charset=UTF-8",
             "User-Agent": "okhttp/3.12.1"
         }
 
-        last_error = None
-        for url in urls_to_try:
-            req = urllib.request.Request(url, data=xml_body.encode('utf-8'), headers=headers)
-            ctx = self.local_ssl_ctx if url.startswith("https") else None
-            try:
-                with urllib.request.urlopen(req, context=ctx, timeout=4) as resp:
-                    return resp.read().decode('utf-8')
-            except urllib.error.HTTPError as e:
-                if e.code == 401 and "WWW-Authenticate" in e.headers:
-                    auth_hdr = e.headers["WWW-Authenticate"]
-                    digest_auth = self._build_digest_header(auth_hdr, username, encoded_pwd)
-                    if digest_auth:
-                        retry_headers = dict(headers)
-                        retry_headers["Authorization"] = digest_auth
-                        req_retry = urllib.request.Request(url, data=xml_body.encode('utf-8'), headers=retry_headers)
-                        with urllib.request.urlopen(req_retry, context=ctx, timeout=4) as resp_retry:
-                            return resp_retry.read().decode('utf-8')
-                last_error = e
-                break
-            except Exception as e:
-                last_error = e
-                continue
-
-        if last_error:
-            raise last_error
+        req = urllib.request.Request(url, data=xml_body.encode('utf-8'), headers=headers)
+        ctx = self.local_ssl_ctx
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=4) as resp:
+                return resp.read().decode('utf-8')
+        except urllib.error.HTTPError as e:
+            if e.code == 401 and "WWW-Authenticate" in e.headers:
+                auth_hdr = e.headers["WWW-Authenticate"]
+                digest_auth = self._build_digest_header(auth_hdr, username, encoded_pwd)
+                if digest_auth:
+                    retry_headers = dict(headers)
+                    retry_headers["Authorization"] = digest_auth
+                    req_retry = urllib.request.Request(url, data=xml_body.encode('utf-8'), headers=retry_headers)
+                    with urllib.request.urlopen(req_retry, context=ctx, timeout=4) as resp_retry:
+                        return resp_retry.read().decode('utf-8')
+            raise e
 
     def discover_intercom_ip(self):
-        """Rate-limited rediscovery of intercom IP if changed by router DHCP."""
-        if not self.device_ip:
+        """Rate-limited rediscovery of intercom IP if changed by router DHCP.
+        
+        Requires a pinned certificate fingerprint to ensure no credentials
+        are ever transmitted to an unverified candidate host.
+        """
+        if not self.device_ip or not self.cert_fingerprint:
             return None
 
         now = time.time()
@@ -389,19 +405,22 @@ class VimarDeviceApi:
             finally:
                 sock.close()
 
-            # 2. Check TLS certificate to verify it is a Qualvision device before sending requests
+            # 2. Strict certificate fingerprint pinning check BEFORE any request/credential is sent
             try:
-                tls_sock = self.local_ssl_ctx.wrap_socket(socket.socket())
-                tls_sock.settimeout(1.0)
-                tls_sock.connect((ip, 443))
-                der = tls_sock.getpeercert(binary_form=True)
-                tls_sock.close()
-                if not der or (b"QUALVISION" not in der and b"QV" not in der):
-                    return None
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe_sock:
+                    probe_sock.settimeout(1.0)
+                    with self.local_ssl_ctx.wrap_socket(probe_sock) as tls_sock:
+                        tls_sock.connect((ip, 443))
+                        der = tls_sock.getpeercert(binary_form=True)
+                        if not der:
+                            return None
+                        candidate_fp = hashlib.sha256(der).hexdigest().lower()
+                        if candidate_fp != self.cert_fingerprint:
+                            return None
             except Exception:
                 return None
 
-            # 3. Verify device identity via get.device.status
+            # 3. Candidate cert matched! Verify device identity strictly via get.device.status over HTTPS
             try:
                 raw_xml = self._execute_cgi_on_ip(ip, "get.device.status")
                 root = ET.fromstring(raw_xml)
@@ -412,21 +431,12 @@ class VimarDeviceApi:
                 mac_text = root.findtext(".//info/mac", "").strip().lower().replace(":", "")
                 expected_mac = (self.device_mac or "").strip().lower().replace(":", "")
                 if expected_mac and mac_text:
-                    if mac_text == expected_mac:
-                        return ip
-                    return None
+                    if mac_text != expected_mac:
+                        return None
 
-                # Fallback if MAC was not configured yet: match model and learn MAC
-                model_text = root.findtext(".//info/model", "").strip()
-                expected_model = self.device_info.get("model", "IDS9457AW")
-                if model_text and model_text == expected_model:
-                    if root.findtext(".//info/mac"):
-                        self.device_mac = root.findtext(".//info/mac").strip().lower()
-                    return ip
+                return ip
             except Exception:
                 return None
-
-            return None
 
         found_ip = None
         with ThreadPoolExecutor(max_workers=10) as executor:
@@ -470,30 +480,33 @@ class VimarDeviceApi:
 
     def get_status(self):
         """Fetch real-time device status."""
-        try:
-            res = self.local_cgi_command("get.device.status")
-            root = ET.fromstring(res)
-            status_elem = root.find(".//devicestatus")
-            status = {}
-            if status_elem is not None:
-                for child in status_elem:
-                    status[child.tag] = child.text == "true"
-            
-            # Product info
-            info_elem = root.find(".//info")
-            if info_elem is not None:
-                for child in info_elem:
-                    status[f"info_{child.tag}"] = child.text
+        res = self.local_cgi_command("get.device.status")
+        root = ET.fromstring(res)
+        err_text = root.findtext(".//error", "-1")
+        if err_text != "0":
+            raise RuntimeError(f"Device returned error code: {err_text}")
 
-            if status.get("info_mac"):
-                self.device_mac = status["info_mac"].strip().lower()
-                if self.device_info:
-                    self.device_info["mac"] = self.device_mac
+        status_elem = root.find(".//devicestatus")
+        status = {}
+        if status_elem is not None:
+            for child in status_elem:
+                status[child.tag] = child.text == "true"
+        
+        # Product info
+        info_elem = root.find(".//info")
+        if info_elem is not None:
+            for child in info_elem:
+                status[f"info_{child.tag}"] = child.text
 
-            return status
-        except Exception as err:
-            _LOGGER.warning("Error fetching Vimar status: %s", err)
-            return {}
+        if status.get("info_mac"):
+            self.device_mac = status["info_mac"].strip().lower()
+            if self.device_info:
+                self.device_info["mac"] = self.device_mac
+
+        if not self.cert_fingerprint and self.device_ip:
+            self.cert_fingerprint = get_device_cert_fingerprint(self.device_ip)
+
+        return status
 
     def _stream_unlock(self, locknumber=2, channel=1, is_retry=False):
         """Esegue lo sblocco fisico del relè tramite flusso multimediale UMSP port 34567."""

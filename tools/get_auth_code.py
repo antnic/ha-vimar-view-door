@@ -18,8 +18,6 @@ import xml.etree.ElementTree as ET
 
 def get_devices(email, password):
     ssl_ctx = ssl.create_default_context()
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = ssl.CERT_NONE
 
     client_id = "003-2078-a989bc1285e51ad8"
     oem_id = "G0078"

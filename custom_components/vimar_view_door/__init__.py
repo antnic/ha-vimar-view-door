@@ -14,9 +14,10 @@ from .const import (
     CONF_AUTH_CODE,
     CONF_DEVICE_ID,
     CONF_DEVICE_MAC,
+    CONF_CERT_FINGERPRINT,
     DEFAULT_POLL_INTERVAL,
 )
-from .vimar_api import VimarDeviceApi
+from .vimar_api import VimarDeviceApi, get_device_cert_fingerprint
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     auth_code = entry.data.get(CONF_AUTH_CODE)
     device_id = entry.data.get(CONF_DEVICE_ID)
     device_mac = entry.data.get(CONF_DEVICE_MAC)
+    cert_fingerprint = entry.data.get(CONF_CERT_FINGERPRINT)
 
     api = VimarDeviceApi(
         email=email,
@@ -38,7 +40,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         out_auth_code=auth_code,
         device_id=device_id,
         device_mac=device_mac,
+        cert_fingerprint=cert_fingerprint,
     )
+
+    # Pin TLS certificate fingerprint for rediscovery if not already stored
+    if not cert_fingerprint and api.device_ip:
+        cert_fp = await hass.async_add_executor_job(
+            get_device_cert_fingerprint, api.device_ip
+        )
+        if cert_fp:
+            api.cert_fingerprint = cert_fp
+            hass.config_entries.async_update_entry(
+                entry, data={**entry.data, CONF_CERT_FINGERPRINT: cert_fp}
+            )
 
     # Initial cloud sync only if auth_code is missing
     if not api.out_auth_code:

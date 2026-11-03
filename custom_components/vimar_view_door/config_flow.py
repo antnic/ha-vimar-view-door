@@ -14,8 +14,9 @@ from .const import (
     CONF_AUTH_CODE,
     CONF_DEVICE_ID,
     CONF_DEVICE_MAC,
+    CONF_CERT_FINGERPRINT,
 )
-from .vimar_api import VimarDeviceApi
+from .vimar_api import VimarDeviceApi, get_device_cert_fingerprint
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -75,13 +76,23 @@ class VimarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._abort_if_unique_id_configured()
 
                     device_mac = getattr(api, "device_mac", None)
-                    if not device_mac and device_ip:
-                        try:
-                            status = await self.hass.async_add_executor_job(api.get_status)
-                            if status and status.get("info_mac"):
-                                device_mac = status["info_mac"]
-                        except Exception:
-                            pass
+                    cert_fingerprint = getattr(api, "cert_fingerprint", None)
+                    if device_ip:
+                        if not cert_fingerprint:
+                            try:
+                                cert_fingerprint = await self.hass.async_add_executor_job(
+                                    get_device_cert_fingerprint, device_ip
+                                )
+                            except Exception as err:
+                                _LOGGER.warning("Could not fetch TLS certificate fingerprint: %s", err)
+
+                        if not device_mac:
+                            try:
+                                status = await self.hass.async_add_executor_job(api.get_status)
+                                if status and status.get("info_mac"):
+                                    device_mac = status["info_mac"]
+                            except Exception as err:
+                                _LOGGER.warning("Could not fetch device status during config flow: %s", err)
 
                     entry_data = {
                         CONF_EMAIL: email,
@@ -90,6 +101,7 @@ class VimarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_AUTH_CODE: device_info.get("out_auth_code", auth_code),
                         CONF_DEVICE_ID: unique_id,
                         CONF_DEVICE_MAC: device_mac or "",
+                        CONF_CERT_FINGERPRINT: cert_fingerprint or "",
                     }
 
                     return self.async_create_entry(

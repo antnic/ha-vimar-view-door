@@ -7,5 +7,6 @@ CONF_DEVICE_IP = "device_ip"
 CONF_AUTH_CODE = "auth_code"
 CONF_DEVICE_ID = "device_id"
 CONF_DEVICE_MAC = "device_mac"
+CONF_CERT_FINGERPRINT = "cert_fingerprint"
 
 DEFAULT_POLL_INTERVAL = 3  # seconds for status (calling, lock, motion)
